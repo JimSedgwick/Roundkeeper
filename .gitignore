@@ -1,0 +1,39 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Environment and local settings
+.env
+.env.*
+!.env.example
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local-only saved game and private user data
+data/
+campaign-data/
+campaigns/
+saves/
+backups/
+exports/
+private/
+uploads/
+user-data/
+
+# Local character or monster image uploads/art.
+# Keep only the public Roundkeeper mark in the repository.
+images/*
+!images/
+!images/roundkeeper-mark.svg
