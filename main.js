@@ -5,6 +5,11 @@
   const CHANNEL_NAME = "dnd-initiative-tracker-sync";
   const EXPORT_FILENAME = "roundkeeper-campaign-backup.json";
   const CELEBRATION_DURATION = 6000;
+  const PROJECT_IMAGE_ROOTS = [
+    "/Users/jimsedgwick/Documents/Codex/2026-04-28/build-a-local-react-web-app",
+    "/Users/jimsedgwick/Library/Application Support/DND Initiative/app",
+  ];
+  const SHERLOCK_CONDITION_IMAGE_BASE = "/images/Sherlock%20Gnomes%20Conditions";
   const CONDITIONS = [
     "Blinded",
     "Charmed",
@@ -49,8 +54,46 @@
     );
   }
 
-  function characterImageUrl(character) {
-    return character.imageUrl;
+  function characterImageKey(character) {
+    return character.name.trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function isSherlockGnomes(character) {
+    return characterImageKey(character) === "sherlock gnomes";
+  }
+
+  function webImageUrl(imageUrl = "") {
+    const trimmedUrl = imageUrl.trim();
+    const matchingRoot = PROJECT_IMAGE_ROOTS.find((root) => trimmedUrl.startsWith(`${root}/`));
+    if (!matchingRoot) return trimmedUrl;
+    return trimmedUrl.slice(matchingRoot.length);
+  }
+
+  function privateCampaignImageUrl(character, variant, privateImages = {}) {
+    return privateImages[characterImageKey(character)]?.[variant] || "";
+  }
+
+  function conditionImageUrl(character, privateImages = {}) {
+    const conditions = character.conditions || [];
+    if (conditions.includes("Unconscious")) {
+      const privateImage = privateCampaignImageUrl(character, "Unconscious", privateImages);
+      if (privateImage) return privateImage;
+    }
+    if (!isSherlockGnomes(character)) return "";
+    const matchingCondition = CONDITIONS.find((condition) => conditions.includes(condition));
+    if (!matchingCondition) return "";
+    return `${SHERLOCK_CONDITION_IMAGE_BASE}/Sherlock%20${encodeURIComponent(matchingCondition)}.jpg`;
+  }
+
+  function victoryImageUrl(character, privateImages = {}) {
+    const privateImage = privateCampaignImageUrl(character, "Victory", privateImages);
+    if (privateImage) return privateImage;
+    if (!isSherlockGnomes(character)) return "";
+    return `${SHERLOCK_CONDITION_IMAGE_BASE}/Sherlock%20Victory.jpg`;
+  }
+
+  function characterImageUrl(character, celebrating = false, privateImages = {}) {
+    return webImageUrl((celebrating && victoryImageUrl(character, privateImages)) || conditionImageUrl(character, privateImages) || character.imageUrl);
   }
 
   function portrait(name, palette) {
@@ -302,6 +345,30 @@
     return { state, setState, updateCharacter };
   }
 
+  function usePrivateConditionImages() {
+    const [privateImages, setPrivateImages] = useState({});
+
+    useEffect(() => {
+      let isMounted = true;
+      fetch("/api/private-condition-images")
+        .then((response) => (response.ok ? response.json() : {}))
+        .then((images) => {
+          if (isMounted && images && typeof images === "object") {
+            setPrivateImages(images);
+          }
+        })
+        .catch((error) => {
+          console.warn("Unable to load private condition images", error);
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }, []);
+
+    return privateImages;
+  }
+
   function useInitiativeHotkeys(setState) {
     useEffect(() => {
       function handleKeyDown(event) {
@@ -381,6 +448,7 @@
 
   function DmRoute() {
     const { state, setState, updateCharacter } = useCombatState();
+    const privateImages = usePrivateConditionImages();
     useInitiativeHotkeys(setState);
     useCelebrationCleanup(state, setState);
     const [conditionTargetId, setConditionTargetId] = useState("");
@@ -744,7 +812,7 @@
               "data-character-id": character.id,
               className: `roster-row ${character.id === state.activeId ? "is-active" : ""} ${!character.visible ? "is-hidden" : ""}`,
             },
-            h("img", { src: characterImageUrl(character, isCelebrating(state, character)), alt: "", className: "roster-avatar" }),
+            h("img", { src: characterImageUrl(character, isCelebrating(state, character), privateImages), alt: "", className: "roster-avatar" }),
             h(
               "div",
               { className: "roster-main" },
@@ -919,7 +987,7 @@
     );
   }
 
-  function DisplayCard({ character, active, upNext, celebrating }) {
+  function DisplayCard({ character, active, upNext, celebrating, privateImages }) {
     return h(
       "article",
       {
@@ -943,7 +1011,7 @@
       h(
         "div",
         { className: "portrait-frame" },
-        h("img", { src: characterImageUrl(character, celebrating), alt: character.name }),
+        h("img", { src: characterImageUrl(character, celebrating, privateImages), alt: character.name }),
       ),
       h(
         "div",
@@ -957,6 +1025,7 @@
 
   function DisplayRoute() {
     const { state } = useCombatState();
+    const privateImages = usePrivateConditionImages();
     const visible = useMemo(
       () => orderCharacters(state.characters, state.orderMode).filter((character) => character.visible),
       [state.characters, state.orderMode],
@@ -1022,6 +1091,7 @@
                     active: showTurnIndicators && character.id === state.activeId,
                     upNext: showTurnIndicators && index === nextIndex,
                     celebrating: isCelebrating(state, character),
+                    privateImages,
                   }),
                 )
               : h("div", { className: "empty-display" }, "No visible characters"),
