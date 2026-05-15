@@ -3,7 +3,7 @@
   const h = React.createElement;
   const STORAGE_KEY = "dnd-initiative-tracker:v1";
   const CHANNEL_NAME = "dnd-initiative-tracker-sync";
-  const EXPORT_FILENAME = "roundkeeper-campaign-backup.json";
+  const EXPORT_FILENAME = "roundkeeper-characters.json";
   const CELEBRATION_DURATION = 6000;
   const PROJECT_IMAGE_ROOTS = [
     "/Users/jimsedgwick/Documents/Codex/2026-04-28/build-a-local-react-web-app",
@@ -50,8 +50,19 @@
     return (
       state.celebration &&
       state.celebration.characterId === character.id &&
+      (state.celebration.type || "victory") === "victory" &&
       Date.now() - state.celebration.startedAt < CELEBRATION_DURATION
     );
+  }
+
+  function activeFeature(state, characters) {
+    if (!state.celebration || Date.now() - state.celebration.startedAt >= CELEBRATION_DURATION) return null;
+    const character = characters.find((item) => item.id === state.celebration.characterId);
+    if (!character) return null;
+    return {
+      character,
+      type: state.celebration.type || "victory",
+    };
   }
 
   function characterImageKey(character) {
@@ -208,10 +219,42 @@
     return defaultState;
   }
 
-  function downloadJson(filename, payload) {
-    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+  function createCharacterId() {
+    return `char-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  function characterFilePayload(state) {
+    return {
+      app: "Roundkeeper",
+      exportedAt: new Date().toISOString(),
+      state: normalizeState({ ...state, celebration: null }),
+    };
+  }
+
+  function jsonBlob(payload) {
+    return new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
       type: "application/json",
     });
+  }
+
+  async function saveJsonFile(filename, payload) {
+    const blob = jsonBlob(payload);
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [
+          {
+            description: "Roundkeeper JSON",
+            accept: { "application/json": [".json"] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    }
+
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -510,7 +553,7 @@
       event.preventDefault();
       const name = draft.name.trim();
       if (!name) return;
-      const id = `char-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      const id = createCharacterId();
       const character = {
         id,
         name,
@@ -556,17 +599,30 @@
     }
 
     function toggleCondition(characterId, condition) {
-      setState((current) => ({
-        ...current,
-        characters: current.characters.map((character) => {
+      setState((current) => {
+        let addedUnconscious = false;
+        const characters = current.characters.map((character) => {
           if (character.id !== characterId) return character;
           const conditions = character.conditions || [];
+          const alreadyHasCondition = conditions.includes(condition);
+          addedUnconscious = condition === "Unconscious" && !alreadyHasCondition;
           const nextConditions = conditions.includes(condition)
             ? conditions.filter((item) => item !== condition)
             : [...conditions, condition];
           return { ...character, conditions: nextConditions };
-        }),
-      }));
+        });
+        return {
+          ...current,
+          characters,
+          celebration: addedUnconscious
+            ? {
+                characterId,
+                startedAt: Date.now(),
+                type: "unconscious",
+              }
+            : current.celebration,
+        };
+      });
     }
 
     function clearConditions(characterId) {
@@ -574,7 +630,7 @@
     }
 
     function resetCombat() {
-      if (!window.confirm("Clear initiatives and sort by player order?")) return;
+      if (!window.confirm("Clear initiatives and sort by seat order?")) return;
       setConditionTargetId("");
       setState((current) => ({
         ...current,
@@ -617,42 +673,57 @@
         celebration: {
           characterId: character.id,
           startedAt: Date.now(),
+          type: "victory",
         },
       }));
     }
 
-    function exportCombatState() {
+    async function exportCombatState() {
       try {
-        downloadJson(EXPORT_FILENAME, {
-          app: "Roundkeeper",
-          exportedAt: new Date().toISOString(),
-          state: normalizeState(state),
-        });
-        setSaveStatus("Backup file exported");
+        await saveJsonFile(EXPORT_FILENAME, characterFilePayload(state));
+        setSaveStatus("File saved");
       } catch (error) {
-        console.warn("Unable to export combat state", error);
-        setSaveStatus("Export failed");
+        if (error?.name === "AbortError") {
+          setSaveStatus("Save canceled");
+          return;
+        }
+        console.warn("Unable to save character file", error);
+        setSaveStatus("Save failed");
       }
+    }
+
+    function importCharacters(savedState) {
+      setState((current) => {
+        const importedCharacters = normalizeState(savedState).characters.map((character) => ({
+          ...character,
+          id: createCharacterId(),
+        }));
+        const characters = orderCharacters([...current.characters, ...importedCharacters], current.orderMode);
+        return {
+          ...current,
+          activeId: current.activeId || characters.find((character) => character.visible)?.id || "",
+          characters,
+        };
+      });
     }
 
     async function importCombatState(event) {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
-      if (!window.confirm("Import this backup file? This will replace the current screen state.")) return;
+      if (!window.confirm("Import this file and add its characters to the tracker?")) return;
       setSaveStatus("Loading...");
       try {
         const parsed = JSON.parse(await readFileAsText(file));
         const importedState = parsed.state && Array.isArray(parsed.state.characters) ? parsed.state : parsed;
         if (!importedState || !Array.isArray(importedState.characters)) {
-          throw new Error("Backup file does not include a characters array");
+          throw new Error("Character file does not include a characters array");
         }
-        const savedState = normalizeState(importedState);
         setConditionTargetId("");
-        setState(savedState);
-        setSaveStatus("Backup imported");
+        importCharacters(importedState);
+        setSaveStatus(`Added ${importedState.characters.length} from ${file.name}`);
       } catch (error) {
-        console.warn("Unable to import combat state", error);
+        console.warn("Unable to import character file", error);
         setSaveStatus("Import failed");
       }
     }
@@ -728,7 +799,7 @@
             onWheel: preventNumberWheel,
             placeholder: "Optional",
           })),
-          h(Field, { label: "Player Order" }, h("input", {
+          h(Field, { label: "Seat" }, h("input", {
             type: "number",
             inputMode: "numeric",
             min: "1",
@@ -766,8 +837,8 @@
           h(
             "div",
             { className: "save-control" },
-            h(Button, { className: "gold", onClick: exportCombatState, type: "button" }, "Export Backup"),
-            h(Button, { onClick: () => backupInputRef.current?.click(), type: "button" }, "Import Backup"),
+            h(Button, { className: "gold", onClick: exportCombatState, type: "button" }, "Save File"),
+            h(Button, { onClick: () => backupInputRef.current?.click(), type: "button" }, "Import File"),
             h("input", {
               ref: backupInputRef,
               type: "file",
@@ -795,7 +866,7 @@
             { className: "combat-stats" },
             h("span", null, `${visibleOrdered.length} visible`),
             h("span", null, `${state.characters.length} total`),
-            h("span", null, state.orderMode === "player" ? "player order" : "initiative order"),
+            h("span", null, state.orderMode === "player" ? "seat order" : "initiative order"),
           ),
         ),
       ),
@@ -841,23 +912,28 @@
                 "aria-label": `Upload image for ${character.name}`,
               }),
             ),
-            h("input", {
-              className: "initiative-input",
-              type: "number",
-              inputMode: "numeric",
-              value: character.initiative,
-              onChange: (event) =>
-                updateCharacter(character.id, {
-                  initiative: event.target.value === "" ? "" : Number(event.target.value),
-                }),
-              onKeyDown: handleInitiativeKeyDown,
-              onWheel: preventNumberWheel,
-              "aria-label": `${character.name} initiative`,
-            }),
+            h(
+              "label",
+              { className: "initiative-field" },
+              h("span", null, "Initiative"),
+              h("input", {
+                className: "initiative-input",
+                type: "number",
+                inputMode: "numeric",
+                value: character.initiative,
+                onChange: (event) =>
+                  updateCharacter(character.id, {
+                    initiative: event.target.value === "" ? "" : Number(event.target.value),
+                  }),
+                onKeyDown: handleInitiativeKeyDown,
+                onWheel: preventNumberWheel,
+                "aria-label": `${character.name} initiative`,
+              }),
+            ),
             h(
               "label",
               { className: "player-order-field" },
-              h("span", null, "Order"),
+              h("span", null, "Seat"),
               h("input", {
                 className: "player-order-input",
                 type: "number",
@@ -869,7 +945,7 @@
                     playerOrder: event.target.value === "" ? "" : Number(event.target.value),
                   }),
                 onWheel: preventNumberWheel,
-                "aria-label": `${character.name} player order`,
+                "aria-label": `${character.name} seat order`,
               }),
             ),
             h(
@@ -1023,9 +1099,40 @@
     );
   }
 
+  function FeaturedPortrait({ feature, privateImages }) {
+    if (!feature) return null;
+    const isVictory = feature.type === "victory";
+    return h(
+      "div",
+      {
+        className: [
+          "feature-portrait",
+          isVictory ? "feature-victory" : "feature-unconscious",
+        ].join(" "),
+        "aria-live": "polite",
+      },
+      h("div", { className: "feature-glow", "aria-hidden": "true" }),
+      h(
+        "div",
+        { className: "feature-frame" },
+        h("img", {
+          src: characterImageUrl(feature.character, isVictory, privateImages),
+          alt: feature.character.name,
+        }),
+      ),
+      h(
+        "div",
+        { className: "feature-title" },
+        h("span", null, isVictory ? "Victory" : "Unconscious"),
+        h("strong", null, feature.character.name),
+      ),
+    );
+  }
+
   function DisplayRoute() {
-    const { state } = useCombatState();
+    const { state, setState } = useCombatState();
     const privateImages = usePrivateConditionImages();
+    useCelebrationCleanup(state, setState);
     const visible = useMemo(
       () => orderCharacters(state.characters, state.orderMode).filter((character) => character.visible),
       [state.characters, state.orderMode],
@@ -1048,6 +1155,7 @@
               ? Math.ceil(visible.length / 3)
               : Math.ceil(visible.length / 4);
     const displayRows = Math.max(1, Math.ceil(Math.max(visible.length, 1) / displayColumns));
+    const feature = activeFeature(state, visible);
 
     return h(
       "main",
@@ -1096,6 +1204,7 @@
                 )
               : h("div", { className: "empty-display" }, "No visible characters"),
           ),
+          h(FeaturedPortrait, { feature, privateImages }),
           h("div", { className: "stage-rail stage-rail-bottom", "aria-hidden": "true" }),
         ),
       ),

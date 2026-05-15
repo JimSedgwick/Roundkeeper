@@ -62,13 +62,44 @@ Roundkeeper saves campaign and encounter data in your browser's local storage on
 
 Uploaded character and monster images are stored inside the browser as local data URLs. They are not written into the project folder.
 
-## Back Up And Restore
+## Save And Import Character Files
 
-Use **Export Backup** on the DM screen to download a JSON backup file. Keep that file somewhere safe if you want to preserve a campaign outside the browser.
+Use **Save File** on the DM screen to save the current character list as a JSON file. Your browser may open a Save As dialog so you can choose the file name and location. If the browser does not support that dialog, Roundkeeper will download a JSON file instead.
 
-Use **Import Backup** on the DM screen to restore a backup file. Importing replaces the current browser state.
+Use **Import File** on the DM screen to choose a saved JSON file. Imported characters are added to the current tracker instead of replacing it.
 
-The backup file may include character names, encounter data, and uploaded image data. Treat it like private campaign data.
+This supports a practical table workflow:
+
+1. Create the party and allies, then save them as something like `main party.json`.
+2. Create monster groups for specific rooms or encounters, then save each group separately.
+3. Start play with only the party and allies in the tracker.
+4. When the party enters a room, import that room's monster file.
+5. Remove defeated monsters with the `X` button until only the party remains.
+
+Saved files may include character names, encounter data, and uploaded image data. Treat them like private campaign data.
+
+## Private Victory And Unconscious Images
+
+Roundkeeper can automatically swap in special local images for the **Victory** button and the **Unconscious** condition.
+
+Put private campaign images here:
+
+```text
+backups/roundkeeper-private-campaign-files/images
+```
+
+Name files with the exact character name followed by `Victory` or `Unconscious`:
+
+```text
+Sherlock Gnomes Victory.jpg
+Sherlock Gnomes Unconscious.jpg
+Room A Skeleton Victory.jpg
+Room A Skeleton Unconscious.jpg
+```
+
+Supported image formats are `.jpg`, `.jpeg`, `.png`, and `.webp`. These private files are ignored by Git and should be shared separately, such as in a zip file.
+
+When a DM clicks **Victory** or applies the **Unconscious** condition, the player display briefly features that character in a large portrait overlay, then returns to the normal initiative grid.
 
 ## Privacy Note
 
