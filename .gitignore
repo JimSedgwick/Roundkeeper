@@ -38,3 +38,5 @@ user-data/
 images/*
 !images/
 !images/roundkeeper-mark.svg
+scripts/make-mjpeg-avi.py
+scripts/make-roundkeeper-video.py
